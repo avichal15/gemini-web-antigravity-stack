@@ -1,0 +1,4 @@
+__pycache__/
+*.py[cod]
+.mythos_web_session.json
+
