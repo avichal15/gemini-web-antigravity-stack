@@ -1,0 +1,11 @@
+# Reference Asset: `agents/openai.yaml`
+
+Converted to Markdown for Gemini Web upload compatibility.
+
+````yaml
+interface:
+  display_name: "/no-ai-slop"
+  short_description: "Remove AI slop while preserving the writer's personal voice."
+  default_prompt: "Use $no-ai-slop to remove AI patterns from this draft while preserving my personal voice."
+
+````

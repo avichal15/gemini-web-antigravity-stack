@@ -1,0 +1,23 @@
+# Reference Asset: `package.json`
+
+Converted to Markdown for Gemini Web upload compatibility.
+
+````json
+{
+  "name": "react-native-components",
+  "version": "1.0.0",
+  "description": "Design-to-code prompt to React Native components for Stitch MCP",
+  "type": "module",
+  "scripts": {
+    "validate": "node scripts/validate.js",
+    "fetch": "bash scripts/fetch-stitch.sh"
+  },
+  "dependencies": {
+    "@swc/core": "^1.3.100"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+
+````
