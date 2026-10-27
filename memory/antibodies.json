@@ -1,0 +1,89 @@
+{
+  "version": "1.1.0",
+  "description": "Active PreToolUse & PostToolUse Antibody Ledger — prevents repeating known mistakes across all sessions and workspaces.",
+  "antibodies": [
+    {
+      "id": "AB-001",
+      "name": "stop-hook-stdin-block",
+      "tool": "run_command",
+      "match_regex": "node(?:\\.exe)?\\s+[\"']?[^\"']*stop-hook\\.mjs[\"']?(?!.*\\|)",
+      "must_not_contain": "|",
+      "action": "rewrite",
+      "rewrite_type": "prepend_stdin_json",
+      "symptom": "Calling stop-hook.mjs directly in PowerShell without piping JSON to stdin hangs forever.",
+      "root_cause": "stop-hook.mjs calls fs.readFileSync(0, 'utf8') on file descriptor 0 (stdin), blocking indefinitely until EOF if no pipe is connected.",
+      "prevention": "Always pipe JSON into stop-hook.mjs stdin or run gate-check.mjs --approve for gate verification."
+    },
+    {
+      "id": "AB-002",
+      "name": "powershell-quoted-exe-missing-call-operator",
+      "tool": "run_command",
+      "match_regex": "^\\s*\"[A-Za-z]:\\\\[^\"]+\\.exe\"\\s+",
+      "action": "rewrite",
+      "rewrite_type": "prepend_powershell_call_operator",
+      "symptom": "PowerShell throws ParserError: Unexpected token '-c' or similar when invoking a quoted .exe path at the start of a line.",
+      "root_cause": "In PowerShell, a quoted string at the start of a statement is parsed as a string literal unless preceded by the call operator (&).",
+      "prevention": "Prepend '& ' before quoted executable paths in PowerShell commands."
+    },
+    {
+      "id": "AB-003",
+      "name": "freellmapi-no-windows-startup",
+      "tool": "run_command",
+      "match_regex": "(?:Microsoft\\\\Windows\\\\Start Menu\\\\Programs\\\\Startup|CurrentVersion\\\\Run).*freellmapi|freellmapi.*(?:Microsoft\\\\Windows\\\\Start Menu\\\\Programs\\\\Startup|CurrentVersion\\\\Run)",
+      "action": "block",
+      "symptom": "Adding FreeLLMAPI to Windows Startup bloats laptop boot time.",
+      "root_cause": "Operator explicitly mandated zero Windows Startup entries for FreeLLMAPI; it must only launch on-demand when port 3001 is called.",
+      "prevention": "Use c:\\Users\\avich\\Downloads\\mythos\\freellmapi\\ensure-freellmapi.js (WMI Win32_Process.Create on-demand launcher) instead of Windows Startup."
+    },
+    {
+      "id": "AB-004",
+      "name": "windows-sync-spawn-handle-inheritance",
+      "tool": "write_file|edit_file",
+      "match_regex": "spawn\\([^)]*freellmapi[^)]*\\)(?![\\s\\S]*Win32_Process)",
+      "action": "warn",
+      "symptom": "Spawning a persistent background daemon from inside a synchronous hook on Windows causes the parent spawnSync call to hang until timeout.",
+      "root_cause": "Windows child processes spawned via Node child_process.spawn can inherit stdout/stderr pipe handles from synchronous parent hooks.",
+      "prevention": "Launch persistent background daemons on Windows via WMI Win32_Process.Create (ShowWindow=0) so zero stdio handles are inherited."
+    },
+    {
+      "id": "AB-005",
+      "name": "embeddinggemma2-fp16-nan",
+      "tool": "write_file|edit_file|run_command",
+      "match_regex": "embeddinggemma-2[\\s\\S]{0,160}float16",
+      "action": "block",
+      "symptom": "EmbeddingGemma 2 returns NaN or silently degraded embeddings when loaded in float16.",
+      "root_cause": "EmbeddingGemma 2's activation range exceeds the dynamic range of IEEE 754 float16 (5-bit exponent).",
+      "prevention": "Always run google/embeddinggemma-2 in torch.bfloat16 (CUDA) or torch.float32 (CPU), never torch.float16."
+    },
+    {
+      "id": "AB-006",
+      "name": "reference-image-forensic-8-axis",
+      "tool": "run_command",
+      "match_regex": "cli-anything-google-vids.*generate(?!.*from-image)",
+      "action": "warn",
+      "symptom": "Generated AI replacement images fail to match the exact pose, hex palette, and graphic artwork of the reference image.",
+      "root_cause": "Synthesizing prompts from product titles instead of extracting all 8 visual axes from the reference image first.",
+      "prevention": "Inspect the reference image via read_file, run 'cli-anything-google-vids --json prompt from-image <ref>', generate, strip watermark via gwr.mjs, and verify side-by-side."
+    },
+    {
+      "id": "AB-007",
+      "name": "antigravity-hooks-json-no-quoted-paths",
+      "tool": "write_file|edit_file",
+      "match_regex": "node\\s+\\\\\"[A-Za-z]:[^\\\\\"]*\\.mjs\\\\\"",
+      "action": "block",
+      "symptom": "Antigravity PreToolUse / PostToolUse / Stop hooks fail with 'Error: Cannot find module C:\\Users\\avich\\Downloads\\mythos\\\"C:\\Users\\avich\\...\"'.",
+      "root_cause": "Antigravity's hook runner splits command strings on spaces and spawns the binary directly without shell quote stripping, so literal quotes around a path are treated as a relative filename.",
+      "prevention": "In hooks.json, never wrap space-free .mjs script paths in escaped quotes (use 'node C:\\Users\\avich\\.gemini\\config\\hooks\\pre-tool-rtk.mjs')."
+    },
+    {
+      "id": "AB-008",
+      "name": "antigravity-posttooluse-no-decision-field",
+      "tool": "write_file|edit_file",
+      "match_regex": "PostToolUse[\\s\\S]{0,600}JSON\\.stringify\\(\\{\\s*decision\\s*:\\s*[\"']allow[\"']\\s*\\}\\)",
+      "action": "block",
+      "symptom": "Antigravity PostToolUse hook fails with 'failed to parse hook output JSON: proto: syntax error: unknown field \"decision\"'.",
+      "root_cause": "Antigravity's PostToolUse protobuf schema does not have a top-level 'decision' field (unlike PreToolUse and Stop).",
+      "prevention": "In PostToolUse hooks (such as post-edit-lint.mjs), output '{}' or '{ \"systemMessage\": \"...\" }' without a top-level 'decision' key."
+    }
+  ]
+}
