@@ -1,24 +1,45 @@
-# Reference Asset: `scripts/godmode_server.js`
+﻿# godmode_server.js (Godmode v4.5)
 
-Converted to Markdown for Gemini Web upload compatibility.
-
-````js
+```javascript
 #!/usr/bin/env node
 /**
- * Godmode MCP Server for Antigravity & Codex (Dual-Gateway OmniRoute + FreeLLMAPI Apex Edition v4.0.0)
+ * Godmode MCP Server for Antigravity & Codex (Dual-Gateway OmniRoute + FreeLLMAPI Apex Edition v4.5.0)
  * Includes:
- * - godmode_parseltongue (lexical encoding & parser boundary audits)
- * - godmode_autotune (context-adaptive sampling parameters)
+ * - godmode_parseltongue (33 lexical/esoteric encodings + selective trigger detection)
+ * - godmode_autotune (20 contexts, 5 strategies, 6 hyperparameters, dynamic prompt classifier & EMA self-learning)
  * - godmode_l1b3rt4s_template (structured prompt framing templates)
- * - godmode_llm_call (Dual-gateway OmniRoute + FreeLLMAPI apex model cascade execution)
- * - godmode_council (4-family parallel multi-model deliberation, peer critique & consensus synthesis)
+ * - godmode_llm_call (Dual-gateway OmniRoute + FreeLLMAPI apex model cascade + STM post-processing)
+ * - godmode_ultraplinian (5-tier multi-model parallel benchmark & 5-axis composite response scorer)
+ * - godmode_council (4-family parallel multi-model deliberation, response scoring, blind peer critique & consensus synthesis)
  * - godmode_challenge (adversarial red-team / devil's-advocate assumption stress-tester)
  */
 const readline = require('node:readline');
 const { spawnSync } = require('node:child_process');
-const { parseltongue } = require('./parseltongue.js');
-const { getAutoTuneParams, CONTEXT_PRESETS } = require('./autotune.js');
+const {
+  parseltongue,
+  detectTriggers,
+  transformSelective,
+  ALL_TECHNIQUES
+} = require('./parseltongue.js');
+const {
+  getAutoTuneParams,
+  CONTEXT_PRESETS,
+  STRATEGIES,
+  classifyQueryContext,
+  computeHeuristics,
+  recordFeedback
+} = require('./autotune.js');
 const { getL1b3rt4sCombo, COMBOS } = require('./l1b3rt4s.js');
+const {
+  SPEED_TIERS,
+  STM_MODULES,
+  applySTMs,
+  classifyPrompt,
+  scoreResponse,
+  extractConsensusAndDisagreements,
+  classifyModelError,
+  diagnoseAllModelsFailed
+} = require('./ultraplinian.js');
 
 const OMNIROUTE_BASE = (process.env.OMNIROUTE_BASE_URL || 'http://127.0.0.1:20128/v1').replace(/\/+$/, '');
 const OMNIROUTE_CHAT_ENDPOINT = `${OMNIROUTE_BASE}/chat/completions`;
@@ -157,7 +178,9 @@ async function executeLlmCall({
   model = 'paid-premium',
   system = '',
   context = '',
+  strategy = 'adaptive',
   combo = '',
+  stm_modules = [],
   max_tokens = 4096
 }) {
   let effectiveSystem = system;
@@ -169,7 +192,10 @@ async function executeLlmCall({
     effectiveUser = framed.userPrompt;
   }
 
-  const tune = context ? getAutoTuneParams(context) : null;
+  const tune = context
+    ? getAutoTuneParams(context === 'auto' ? { prompt, strategy } : { context, prompt, strategy })
+    : null;
+
   const messages = [];
   if (effectiveSystem) {
     messages.push({ role: 'system', content: effectiveSystem });
@@ -197,6 +223,7 @@ async function executeLlmCall({
         payload.top_p = tune.top_p;
       }
 
+      const startMs = Date.now();
       const res = await fetch(target.endpoint, {
         method: 'POST',
         headers: {
@@ -209,17 +236,26 @@ async function executeLlmCall({
 
       if (!res.ok) {
         const errText = await res.text();
-        errors.push({ gateway: target.provider, model: candidateModel, status: res.status, error: errText.slice(0, 200) });
+        const errItem = { gateway: target.provider, model: candidateModel, status: res.status, error: errText.slice(0, 200) };
+        errItem.category = classifyModelError(errItem);
+        errors.push(errItem);
         continue;
       }
 
       const data = await res.json();
+      const latencyMs = Date.now() - startMs;
       const choice = data.choices && data.choices[0];
-      const content = choice && choice.message ? choice.message.content : '';
+      const rawContent = choice && choice.message ? choice.message.content : '';
       const reasoning = choice && choice.message ? (choice.message.reasoning_content || choice.message.thinking || null) : null;
       const routedVia = res.headers.get('x-routed-via') || undefined;
 
-      if (content || reasoning) {
+      if (rawContent || reasoning) {
+        const baseText = rawContent || reasoning;
+        const finalContent = Array.isArray(stm_modules) && stm_modules.length > 0
+          ? applySTMs(baseText, stm_modules)
+          : baseText;
+        const quality = scoreResponse(finalContent, prompt);
+
         return {
           status: 'ok',
           isError: false,
@@ -229,16 +265,22 @@ async function executeLlmCall({
           routed_model: data.model || target.upstreamModel,
           routed_via: routedVia,
           candidate_used: candidateModel,
-          autotune_context: context || null,
+          latency_ms: latencyMs,
+          autotune_context: tune ? tune.context : (context || null),
+          autotune_strategy: tune ? tune.strategy : null,
           template_combo: combo || null,
-          response: content || reasoning,
-          reasoning: reasoning && content ? reasoning : undefined,
+          stm_applied: Array.isArray(stm_modules) && stm_modules.length > 0 ? stm_modules : undefined,
+          quality_score: quality.totalScore,
+          response: finalContent,
+          reasoning: reasoning && rawContent ? reasoning : undefined,
           usage: data.usage || null
         };
       }
-      errors.push({ gateway: target.provider, model: candidateModel, status: res.status, error: 'Empty response content' });
+      errors.push({ gateway: target.provider, model: candidateModel, status: res.status, category: 'empty_response', error: 'Empty response content' });
     } catch (err) {
-      errors.push({ gateway: target.provider, model: candidateModel, error: err.message });
+      const errItem = { gateway: target.provider, model: candidateModel, error: err.message };
+      errItem.category = classifyModelError(errItem);
+      errors.push(errItem);
     }
   }
 
@@ -247,7 +289,72 @@ async function executeLlmCall({
     requested_model: model,
     isError: true,
     error: 'All OmniRoute and FreeLLMAPI candidate models failed',
+    diagnostics: diagnoseAllModelsFailed(errors),
     attempts: errors
+  };
+}
+
+/**
+ * Execute ULTR4PL1N14N multi-model benchmark across 5 speed tiers with 5-axis response scoring & ranking.
+ */
+async function executeUltraplinian({
+  prompt,
+  tier = 'smart',
+  models,
+  stm_modules = ['hedge_reducer', 'direct_mode'],
+  max_tokens
+}) {
+  const tierConfig = SPEED_TIERS[tier] || SPEED_TIERS.smart;
+  const panel = Array.isArray(models) && models.length >= 2 ? models : tierConfig.models;
+  const effectiveMaxTokens = Number(max_tokens) || tierConfig.max_tokens;
+  const promptDomain = classifyPrompt(prompt);
+
+  const rawResults = await Promise.all(
+    panel.map(async (m) => {
+      const res = await executeLlmCall({
+        prompt,
+        model: m,
+        context: 'auto',
+        stm_modules,
+        max_tokens: effectiveMaxTokens
+      });
+      const score = res.isError
+        ? { totalScore: 0, metrics: { substance: 0, structure: 0, relevance: 0, depth: 0, hedgePenalty: 0 }, wordCount: 0, codeBlockCount: 0 }
+        : scoreResponse(res.response, prompt);
+
+      return {
+        requested_model: m,
+        routed_model: res.routed_model || m,
+        gateway: res.provider || 'omniroute',
+        latency_ms: res.latency_ms || null,
+        isError: Boolean(res.isError),
+        score: score.totalScore,
+        score_metrics: score.metrics,
+        word_count: score.wordCount,
+        code_blocks: score.codeBlockCount,
+        response: res.response || res.error || 'No response'
+      };
+    })
+  );
+
+  const ranked = [...rawResults].sort((a, b) => b.score - a.score);
+  const best = ranked.find(r => !r.isError) || null;
+  const { consensus_points, disagreement_points } = extractConsensusAndDisagreements(ranked);
+
+  return {
+    mode: 'godmode_ultraplinian',
+    tier: tierConfig.name,
+    prompt_domain: promptDomain,
+    models_queried: panel.length,
+    winner: best ? {
+      model: best.routed_model,
+      score: best.score,
+      latency_ms: best.latency_ms,
+      response: best.response
+    } : null,
+    consensus_points,
+    disagreement_points,
+    ranked_results: ranked
   };
 }
 
@@ -267,14 +374,19 @@ async function executeCouncil({
         model: m,
         system: 'You are Council Member #' + (idx + 1) + '. Provide a rigorous, first-principles technical analysis with concrete trade-offs, failure modes, and actionable recommendations. Zero filler.',
         context,
+        stm_modules: ['hedge_reducer', 'direct_mode'],
         max_tokens
       });
+      const score = res.isError ? { totalScore: 0, metrics: {} } : scoreResponse(res.response, prompt);
       return {
         member: `Member_${idx + 1}`,
         gateway: res.provider || 'omniroute',
         requested_model: m,
         routed_model: res.routed_model || m,
         candidate_used: res.candidate_used || m,
+        latency_ms: res.latency_ms || null,
+        quality_score: score.totalScore,
+        score_metrics: score.metrics,
         isError: Boolean(res.isError),
         response: res.response || res.error || 'No response'
       };
@@ -290,9 +402,11 @@ async function executeCouncil({
     };
   }
 
+  const { consensus_points, disagreement_points } = extractConsensusAndDisagreements(validResponses);
+
   // Stage 2: Blind Adversarial Synthesis & Consensus Resolution
   const anonymizedTranscript = validResponses
-    .map((r, i) => `=== Candidate Response ${String.fromCharCode(65 + i)} (${r.routed_model}) ===\n${r.response}`)
+    .map((r, i) => `=== Candidate Response ${String.fromCharCode(65 + i)} (${r.routed_model}, Quality Score: ${r.quality_score}/100) ===\n${r.response}`)
     .join('\n\n');
 
   const synthesisPrompt = [
@@ -309,12 +423,15 @@ async function executeCouncil({
     model: 'paid-premium',
     system: 'You are the Chief Arbiter of a multi-model engineering council. Output a sharp, zero-fluff consensus synthesis.',
     context: 'security_audit',
+    stm_modules: ['hedge_reducer', 'direct_mode'],
     max_tokens: 3072
   });
 
   return {
     mode: 'godmode_council',
     panel_models: panel,
+    consensus_points,
+    disagreement_points,
     individual_deliberations: stage1Results,
     consensus_synthesis: synthesis.response || synthesis.error,
     arbiter_model: synthesis.routed_model || 'paid-premium'
@@ -342,6 +459,7 @@ async function executeChallenge({
     model,
     system: 'You are an adversarial staff principal engineer and red-team auditor. Never rubber-stamp. Find every real flaw and provide concrete fixes.',
     context: 'security_audit',
+    stm_modules: ['hedge_reducer', 'direct_mode'],
     max_tokens
   });
 
@@ -351,6 +469,8 @@ async function executeChallenge({
     requested_model: model,
     routed_model: res.routed_model || model,
     candidate_used: res.candidate_used || model,
+    latency_ms: res.latency_ms || null,
+    quality_score: res.quality_score || null,
     isError: Boolean(res.isError),
     adversarial_critique: res.response || res.error
   };
@@ -359,20 +479,29 @@ async function executeChallenge({
 const TOOLS = [
   {
     name: "godmode_parseltongue",
-    description: "Transform and encode text using lexical techniques (leetspeak, unicode homoglyphs, zero-width, phonetic, mixedcase) for parser resilience and security boundary audits.",
+    description: "Transform and encode text using 33 lexical/esoteric techniques (leetspeak, unicode, insert_ZWS, base64, rot13, morse, binary, hex, pig_latin, elder_futhark, hieroglyphs, fraktur, NATO_phonetic, etc.) and selective trigger token detection for parser resilience and security boundary audits.",
     inputSchema: {
       type: "object",
       properties: {
         text: { type: "string", description: "The text to transform" },
         technique: {
           type: "string",
-          enum: ["leetspeak", "unicode", "zwj", "mixedcase", "phonetic"],
-          description: "Transformation technique (default: leetspeak)"
+          enum: ALL_TECHNIQUES,
+          description: "Transformation technique across 33 standard, esoteric, and linguistic encodings (default: leetspeak)"
         },
         intensity: {
           type: "string",
           enum: ["light", "medium", "heavy"],
           description: "Transformation intensity level (default: heavy)"
+        },
+        selective: {
+          type: "boolean",
+          description: "If true, only transforms detected parser-sensitive trigger words while keeping surrounding text readable"
+        },
+        triggers: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional custom trigger words to selectively obfuscate"
         }
       },
       required: ["text"]
@@ -380,14 +509,23 @@ const TOOLS = [
   },
   {
     name: "godmode_autotune",
-    description: "Calculate optimal sampling parameters (temperature, top_p, penalties) for specific query contexts.",
+    description: "Calculate optimal 6-parameter sampling hyperparameters (temperature, top_p, top_k, frequency_penalty, presence_penalty, repetition_penalty) across 20 query contexts and 5 strategies (precise, balanced, creative, chaotic, adaptive), with dynamic prompt classification and EMA self-learning.",
     inputSchema: {
       type: "object",
       properties: {
         context: {
           type: "string",
-          enum: Object.keys(CONTEXT_PRESETS),
-          description: "The execution context (code_generation, security_audit, refactoring, creative_architecture, math_reasoning)"
+          enum: ["auto", ...Object.keys(CONTEXT_PRESETS)],
+          description: "Execution context (or 'auto' to dynamically classify from prompt)"
+        },
+        strategy: {
+          type: "string",
+          enum: Object.keys(STRATEGIES),
+          description: "Sampling strategy modifier (precise, balanced, creative, chaotic, adaptive)"
+        },
+        prompt: {
+          type: "string",
+          description: "Optional user prompt for dynamic context classification when context is 'auto'"
         }
       },
       required: ["context"]
@@ -411,7 +549,7 @@ const TOOLS = [
   },
   {
     name: "godmode_llm_call",
-    description: "Execute a high-depth query via Dual-Gateway OmniRoute (http://127.0.0.1:20128/v1) + FreeLLMAPI (http://127.0.0.1:3001/v1) using the verified 14-model apex cascade (paid-premium -> agy/claude-opus-4-6-thinking -> cx/gpt-5.6-luna-max -> cx/codex-auto-review-max -> cu/auto-intelligence -> gweb/gemini-3.1-pro -> agy/claude-sonnet-4-6 -> agy/gemini-3.8-flash-high -> openrouter/nvidia/nemotron-3-ultra-550b-a55b:free -> groq/openai/gpt-oss-120b -> freellmapi/auto:coding -> freellmapi/auto:smart) with optional AutoTune sampling and prompt framing.",
+    description: "Execute a high-depth query via Dual-Gateway OmniRoute (http://127.0.0.1:20128/v1) + FreeLLMAPI (http://127.0.0.1:3001/v1) using the verified 14-model apex cascade with AutoTune sampling, optional prompt framing, STM post-processing, and response quality scoring.",
     inputSchema: {
       type: "object",
       properties: {
@@ -423,13 +561,23 @@ const TOOLS = [
         system: { type: "string", description: "Optional system prompt" },
         context: {
           type: "string",
-          enum: Object.keys(CONTEXT_PRESETS),
-          description: "Optional AutoTune sampling preset (code_generation, security_audit, refactoring, creative_architecture, math_reasoning)"
+          enum: ["auto", ...Object.keys(CONTEXT_PRESETS)],
+          description: "Optional AutoTune sampling preset (or 'auto' for dynamic prompt classification)"
+        },
+        strategy: {
+          type: "string",
+          enum: Object.keys(STRATEGIES),
+          description: "Optional AutoTune strategy (precise, balanced, creative, chaotic, adaptive)"
         },
         combo: {
           type: "string",
           enum: Object.keys(COMBOS),
           description: "Optional structured prompt framing template (grok-420, gemini-reset, claude-inversion)"
+        },
+        stm_modules: {
+          type: "array",
+          items: { type: "string", enum: Object.keys(STM_MODULES) },
+          description: "Optional Surgical Text Modules for post-processing (hedge_reducer, direct_mode, casual_mode)"
         },
         max_tokens: { type: "number", description: "Maximum output tokens (default: 4096)" }
       },
@@ -437,8 +585,35 @@ const TOOLS = [
     }
   },
   {
+    name: "godmode_ultraplinian",
+    description: "Benchmark and rank multiple frontier models in parallel across 5 speed tiers (fast, standard, smart, power, ultra) with 5-axis composite response quality scoring (substance, structure, relevance, depth, hedgePenalty), STM post-processing, and consensus/disagreement extraction.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "The query or engineering task to benchmark across models" },
+        tier: {
+          type: "string",
+          enum: Object.keys(SPEED_TIERS),
+          description: "Speed/breadth tier: fast (2 models), standard (3 models), smart (4 models), power (5 models), ultra (7 models)"
+        },
+        models: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional custom array of models overriding the tier default"
+        },
+        stm_modules: {
+          type: "array",
+          items: { type: "string", enum: Object.keys(STM_MODULES) },
+          description: "STM post-processing modules applied before scoring (default: ['hedge_reducer', 'direct_mode'])"
+        },
+        max_tokens: { type: "number", description: "Max output tokens per candidate model" }
+      },
+      required: ["prompt"]
+    }
+  },
+  {
     name: "godmode_council",
-    description: "Query 4 independent frontier model families in parallel (Anthropic Claude Opus 4.6 Thinking, OpenAI Codex GPT-5.6 Luna Max, Google Gemini 3.8 Flash High, NVIDIA Nemotron-3 Ultra 550B MoE) via OmniRoute + FreeLLMAPI, run blind peer critique, and synthesize an authoritative consensus answer.",
+    description: "Query 4 independent frontier model families in parallel (Anthropic Claude Opus 4.6 Thinking, OpenAI Codex GPT-5.6 Luna Max, Google Gemini 3.8 Flash High, NVIDIA Nemotron-3 Ultra 550B MoE) via OmniRoute + FreeLLMAPI, score each response, extract consensus/disagreement points, run blind peer critique, and synthesize an authoritative consensus answer.",
     inputSchema: {
       type: "object",
       properties: {
@@ -446,7 +621,7 @@ const TOOLS = [
         models: {
           type: "array",
           items: { type: "string" },
-          description: "Optional array of OmniRoute/FreeLLMAPI models to include on the council (defaults to Claude Opus 4.6 Thinking + GPT-5.6 Luna Max + Gemini 3.8 Flash High + Nemotron-3 Ultra 550B)"
+          description: "Optional array of OmniRoute/FreeLLMAPI models to include on the council"
         },
         context: {
           type: "string",
@@ -482,17 +657,21 @@ if (require.main === module && process.argv.length > 2) {
     else if (args[i] === '--proposal' && args[i + 1]) opts.proposal = args[++i];
     else if (args[i] === '--goal' && args[i + 1]) opts.goal = args[++i];
     else if (args[i] === '--mode' && args[i + 1]) opts.mode = args[++i];
+    else if (args[i] === '--tier' && args[i + 1]) opts.tier = args[++i];
     else if (args[i] === '--model' && args[i + 1]) opts.model = args[++i];
     else if (args[i] === '--system' && args[i + 1]) opts.system = args[++i];
     else if (args[i] === '--context' && args[i + 1]) opts.context = args[++i];
+    else if (args[i] === '--strategy' && args[i + 1]) opts.strategy = args[++i];
     else if (args[i] === '--combo' && args[i + 1]) opts.combo = args[++i];
     else if (args[i] === '--max-tokens' && args[i + 1]) opts.max_tokens = Number(args[++i]);
   }
   const runner = opts.mode === 'council'
     ? executeCouncil(opts)
-    : opts.mode === 'challenge'
-      ? executeChallenge({ proposal: opts.proposal || opts.prompt, goal: opts.goal, model: opts.model, max_tokens: opts.max_tokens })
-      : executeLlmCall(opts);
+    : opts.mode === 'ultraplinian'
+      ? executeUltraplinian(opts)
+      : opts.mode === 'challenge'
+        ? executeChallenge({ proposal: opts.proposal || opts.prompt, goal: opts.goal, model: opts.model, max_tokens: opts.max_tokens })
+        : executeLlmCall(opts);
   runner.then((res) => {
     console.log(JSON.stringify(res, null, 2));
     process.exit(res.isError ? 1 : 0);
@@ -513,7 +692,7 @@ if (require.main === module && process.argv.length > 2) {
           result: {
             protocolVersion: "2024-11-05",
             capabilities: { tools: {} },
-            serverInfo: { name: "godmode-mcp-server", version: "4.0.0" }
+            serverInfo: { name: "godmode-mcp-server", version: "4.5.0" }
           }
         };
         process.stdout.write(JSON.stringify(resp) + '\n');
@@ -535,12 +714,24 @@ if (require.main === module && process.argv.length > 2) {
         let toolResult = null;
 
         if (name === 'godmode_parseltongue') {
-          const transformed = parseltongue(args.text, args.technique || 'leetspeak', args.intensity || 'heavy');
+          const payload = args.selective || (Array.isArray(args.triggers) && args.triggers.length > 0)
+            ? transformSelective(args.text, args.technique || 'leetspeak', args.intensity || 'heavy', args.triggers || [])
+            : {
+                original: args.text,
+                technique: args.technique || 'leetspeak',
+                intensity: args.intensity || 'heavy',
+                detected_triggers: detectTriggers(args.text),
+                transformed: parseltongue(args.text, args.technique || 'leetspeak', args.intensity || 'heavy')
+              };
           toolResult = {
-            content: [{ type: "text", text: JSON.stringify({ original: args.text, technique: args.technique || 'leetspeak', transformed }, null, 2) }]
+            content: [{ type: "text", text: JSON.stringify(payload, null, 2) }]
           };
         } else if (name === 'godmode_autotune') {
-          const params = getAutoTuneParams(args.context);
+          const params = getAutoTuneParams({
+            context: args.context === 'auto' ? undefined : args.context,
+            prompt: args.prompt || '',
+            strategy: args.strategy || 'adaptive'
+          });
           toolResult = {
             content: [{ type: "text", text: JSON.stringify(params, null, 2) }]
           };
@@ -555,8 +746,22 @@ if (require.main === module && process.argv.length > 2) {
             model: args.model || 'paid-premium',
             system: args.system || '',
             context: args.context || '',
+            strategy: args.strategy || 'adaptive',
             combo: args.combo || '',
+            stm_modules: args.stm_modules || [],
             max_tokens: args.max_tokens || 4096
+          });
+          toolResult = {
+            isError: Boolean(result.isError),
+            content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+          };
+        } else if (name === 'godmode_ultraplinian') {
+          const result = await executeUltraplinian({
+            prompt: args.prompt,
+            tier: args.tier || 'smart',
+            models: args.models,
+            stm_modules: args.stm_modules || ['hedge_reducer', 'direct_mode'],
+            max_tokens: args.max_tokens
           });
           toolResult = {
             isError: Boolean(result.isError),
@@ -600,4 +805,5 @@ if (require.main === module && process.argv.length > 2) {
   });
 }
 
-````
+```
+
