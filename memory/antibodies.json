@@ -84,6 +84,16 @@
       "symptom": "Antigravity PostToolUse hook fails with 'failed to parse hook output JSON: proto: syntax error: unknown field \"decision\"'.",
       "root_cause": "Antigravity's PostToolUse protobuf schema does not have a top-level 'decision' field (unlike PreToolUse and Stop).",
       "prevention": "In PostToolUse hooks (such as post-edit-lint.mjs), output '{}' or '{ \"systemMessage\": \"...\" }' without a top-level 'decision' key."
+    },
+    {
+      "id": "AB-009",
+      "name": "windows-node-fetch-abort-exit-crash",
+      "tool": "write_file",
+      "match_regex": "AbortSignal\\.timeout\\([)]+\\)[\\s\\S]{0,200}process\\.exit\\(",
+      "action": "warn",
+      "symptom": "Windows Node.js crashes with Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\\win\\async.c, line 76 on exit",
+      "root_cause": "Calling process.exit(0) immediately after fetch() with AbortSignal.timeout() while undici/AbortSignal libuv async handles are still closing on Windows",
+      "prevention": "Use node:http/node:https request with req.setTimeout() and set process.exitCode instead of calling process.exit() immediately after fetch()"
     }
   ]
 }
