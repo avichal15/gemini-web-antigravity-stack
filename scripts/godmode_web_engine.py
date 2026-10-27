@@ -154,9 +154,10 @@ def classify_prompt(prompt: str) -> str:
 
 
 def apply_stms(text: str) -> str:
-    out = re.sub(r"\bas an ai(?: language model| assistant)?\b[^.!?\n]*[.!?]?", "", text, flags=re.I)
-    out = re.sub(r"\bit is important to (?:note|remember|keep in mind) that\b", "", out, flags=re.I)
-    out = re.sub(r"^(?:sure|certainly|absolutely|of course|great question)[!,.]?\s+(?:here(?:'s| is| are)\b[^:\n]*:\s*)?", "", out.strip(), flags=re.I)
+    out = re.sub(r"^(?:sure|certainly|absolutely|of course|great question)[!,.]?\s+(?:here(?:'s| is| are)\b[^:\n]*:\s*)?", "", text.strip(), flags=re.I)
+    out = re.sub(r"\bas an ai(?: language model| assistant)?,\s*", "", out, flags=re.I)
+    out = re.sub(r"(?:^|\.\s+)as an ai(?: language model| assistant)?\b[^.!?\n]*[.!?]?", "", out, flags=re.I)
+    out = re.sub(r"\bit is important to (?:note|remember|keep in mind) that\s*", "", out, flags=re.I)
     return out.strip()
 
 
