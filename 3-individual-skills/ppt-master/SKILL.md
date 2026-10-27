@@ -1,6 +1,21 @@
 ---
 name: ppt-master
-description: "AI-driven presentation workflow for generating editable PPTX decks and slides, reconstructing page visuals, creating reusable Brand/Style/Layout/Deck workspaces, filling native PPTX templates, and enhancing finished PPTX files. Use when the user asks to create, generate, reconstruct, regenerate, beautify, redesign, template, fill, or enhance a presentation, PPT, PPTX, slide deck, or courseware — including adding narration or animation to one — re"
+description: >
+  AI-driven presentation workflow for generating editable PPTX decks and slides,
+  reconstructing page visuals, creating reusable Brand/Style/Layout/Deck
+  workspaces, filling native PPTX templates, and enhancing finished PPTX files.
+  Use when the user asks to create, generate, reconstruct, regenerate, beautify,
+  redesign, template, fill, or enhance a presentation, PPT, PPTX, slide deck, or
+  courseware — including adding narration or animation to one — requests a
+  presentation-authored narrated/self-running video, or mentions ppt-master.
+metadata:
+  version: "6.7.3"
+  copyright: "Copyright (c) 2025-2026 Hugo He"
+  license: "MIT"
+  official_repository: "https://github.com/hugohe3/ppt-master"
+  sponsors:
+    - "SPONSORS.md"
+    - "SPONSORS_CN.md"
 ---
 
 # PPT Master Skill
@@ -126,28 +141,3 @@ ends at export. Step numbers stay as written.
 - Repository-level documents may point into the package; package runtime files must not depend on repository-level instructions.
 - On Windows, if a documented `python3 ...` command is unavailable, rerun the same command with `python`.
 - Sponsor information is optional reference material. Read the matching [`SPONSORS.md`](SPONSORS.md) or [`SPONSORS_CN.md`](SPONSORS_CN.md) only when the user explicitly requests a model, AI image model, API/provider, or hosted-service recommendation. Never surface sponsor or model recommendations proactively during normal generation, troubleshooting, or quality review.
-
----
-
-## Gemini Web Execution Adaptation (`ppt-master`)
-
-When executing `ppt-master` inside **Gemini Web (`gemini.google.com`)**, map desktop Antigravity operations to their Gemini Web equivalents:
-
-1. **Shell, Linter & Gate Verification (`run_command` / `hooks.json`)**:
-   - Execute Python validation, calculations, AST/syntax checks, and gate checks directly inside **Gemini Web's Python Code Execution Sandbox**.
-   - If `scripts/mythos_web_runtime.py` is bundled in the active skill folder, run:
-     - `python scripts/mythos_web_runtime.py pre-check --action "<action>" --target "<cmd_or_file>"`
-     - `python scripts/mythos_web_runtime.py post-verify --file "<generated_file>"`
-     - `python scripts/mythos_web_runtime.py gate-check --gates GATES.md --approve`
-   - When generating PowerShell/Bash commands meant for the operator's local Windows machine, output complete, copy-paste-ready scripts (respecting Antibody `AB-002`: prepend `& ` to quoted `.exe` paths in PowerShell).
-
-2. **Web Research, Discovery & Documentation Grounding (`search_web` / `context7` / `agent-reach` / `scrapling`)**:
-   - Use **Gemini Google Search Grounding** and **URL Fetch / Browsing** to verify primary documentation, GitHub repositories, release versions, and API signatures before writing code.
-   - For bundled playbooks, skills, or operator project memory, query `python scripts/mythos_memory_search.py --query "<topic>" --source all`.
-
-3. **Frontend Rendering, Stitch Design & Browser Verification (`ag-browser-check` / `chrome-devtools-mcp` / `StitchMCP`)**:
-   - Render interactive UI previews, React/Tailwind components, dashboards, and data visualizations directly inside **Gemini Canvas** (or as self-contained single-file HTML/React artifacts) and verify responsive layout, accessibility contrast, and interactive states before completion.
-
-4. **Multi-Agent & Godmode Deliberation (`invoke_subagent` / `godmode_council` / `godmode_challenge`)**:
-   - Run `python scripts/godmode_web_engine.py council --question "<architectural_question>"` and `python scripts/godmode_web_engine.py challenge --target "<plan_or_file>"` inside the Python sandbox to execute the 4-Perspective Council (Opus Systems + Codex Pragmatist + Gemini Integration + Nemotron Scale) and Adversarial Red-Team Challenge pass.
-
